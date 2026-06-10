@@ -3,25 +3,27 @@ nextflow.enable.dsl = 2
 /*
  * SET UP PARAMETERS
  */
-// URLs for automatic download
 params.metadata_url   = "metadata.tsv"
-params.classifier_url = "https://data.qiime2.org/classifiers/sklearn-1.4.2/greengenes/gg-13-8-99-515-806-nb-classifier.qza"
+params.classifier_url = "https://data.qiime2.org/classifiers/sklearn-1.4.2/silva/silva-138-99-nb-classifier.qza"
 params.reads_dir      = null
 
 params.outdir         = "${launchDir}/qiime2_results"
 params.barcode_col    = "barcode-sequence"
+
+// Primer sequences (adjust to your actual primers)
+params.primer_f       = "CCTACGGGNGGCWGCAG"
+params.primer_r       = "GACTACHVGGGTATCTAATCC"
 
 // dada2 trimming parameters
 params.trim_left      = 0
 params.trunc_len_f    = 283
 params.trunc_len_r    = 229
 
-
 // DADA2 quality filtering
 params.max_ee              = 2
 
 // Diversity analysis
-params.sampling_depth = 10000
+params.sampling_depth = 27892
 
 
 /*
@@ -118,7 +120,7 @@ process DEMUX {
 
     script:
     """
-    qiime demux emp-single \
+    qiime demux emp-paired \
         --i-seqs ${emp_seqs} \
         --m-barcodes-file ${metadata} \
         --m-barcodes-column ${params.barcode_col} \
@@ -141,6 +143,28 @@ process VISUALIZE_DEMUX {
     qiime demux summarize \
         --i-data ${demux_qza} \
         --o-visualization demux.qzv
+    """
+}
+
+process CUTADAPT {
+    publishDir "${params.outdir}/trimmed", mode: 'copy'
+
+    input:
+    path demux_qza
+
+    output:
+    path "trimmed-seqs.qza", emit: trimmed_seqs
+
+    script:
+    """
+    qiime cutadapt trim-paired \
+        --i-demultiplexed-sequences ${demux_qza} \
+        --p-front-f ${params.primer_f} \
+        --p-front-r ${params.primer_r} \
+        --p-error-rate 0.1 \
+        --p-discard-untrimmed \
+        --o-trimmed-sequences trimmed-seqs.qza \
+        --verbose
     """
 }
 
@@ -270,9 +294,6 @@ process DIVERSITY_VISUALIZATIONS {
 
     script:
     """
-    #
-    # Alpha diversity significance visualizations
-    #
     qiime diversity alpha-group-significance \
         --i-alpha-diversity ${core_metrics_dir}/shannon_vector.qza \
         --m-metadata-file ${metadata} \
@@ -293,9 +314,6 @@ process DIVERSITY_VISUALIZATIONS {
         --m-metadata-file ${metadata} \
         --o-visualization faith-pd-group-significance.qzv || true
 
-    #
-    # Beta diversity emperor plots
-    #
     qiime emperor plot \
         --i-pcoa ${core_metrics_dir}/jaccard_pcoa_results.qza \
         --m-metadata-file ${metadata} \
@@ -334,26 +352,17 @@ process CHAO1_ALPHA_DIVERSITY {
 
     script:
     """
-    #
-    # Faith PD
-    #
     qiime diversity alpha-phylogenetic \
         --i-table ${table} \
         --i-phylogeny ${rooted_tree} \
         --p-metric faith_pd \
         --o-alpha-diversity faith-pd-vector.qza
 
-    #
-    # Chao1
-    #
     qiime diversity alpha \
         --i-table ${table} \
         --p-metric chao1 \
         --o-alpha-diversity chao1-vector.qza
 
-    #
-    # Visualizations
-    #
     qiime diversity alpha-group-significance \
         --i-alpha-diversity chao1-vector.qza \
         --m-metadata-file ${metadata} \
@@ -392,31 +401,18 @@ workflow {
     ch_classifier = file(params.classifier_url)
     ch_reads_dir  = file(params.reads_dir)
 
-    /*
-     * Rename reads
-     */
     RENAME_READS(ch_reads_dir)
 
-    /*
-     * Import paired-end reads
-     */
     IMPORT_PAIRED(RENAME_READS.out)
 
-    /*
-     * Visualize imported reads
-     */
     VISUALIZE_DEMUX(IMPORT_PAIRED.out)
 
-    /*
-     * DADA2
-     */
-    DADA2(IMPORT_PAIRED.out)
+    CUTADAPT(IMPORT_PAIRED.out)
+
+    DADA2(CUTADAPT.out.trimmed_seqs)
 
     DADA2_STATS_VIZ(DADA2.out.stats)
 
-    /*
-     * Phylogeny + diversity
-     */
     PHYLOGENY(DADA2.out.rep_seqs)
 
     CORE_DIVERSITY(
@@ -436,9 +432,6 @@ workflow {
         ch_metadata
     )
 
-    /*
-     * Taxonomy
-     */
     CLASSIFY_TAXONOMY(
         DADA2.out.rep_seqs,
         ch_classifier
