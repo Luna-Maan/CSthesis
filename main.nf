@@ -11,19 +11,27 @@ params.outdir         = "${launchDir}/qiime2_results"
 params.barcode_col    = "barcode-sequence"
 
 // Primer sequences (adjust to your actual primers)
-params.primer_f       = "CCTACGGGNGGCWGCAG"
-params.primer_r       = "GACTACHVGGGTATCTAATCC"
+params.primer_f       = "YCAGCMGCCGCGGTAA"
+params.primer_r       = "TACNVGGGTWTCTAAT"
+//mockdata: YCAGCMGCCGCGGTAA, TACNVGGGTWTCTAAT
+//colombian: CCTACGGGNGGCWGCAG, GACTACHVGGGTATCTAATCC
 
 // dada2 trimming parameters
 params.trim_left      = 0
-params.trunc_len_f    = 283
-params.trunc_len_r    = 229
+
+params.trunc_len_f    = 200
+params.trunc_len_r    = 180
+// mockdata: 200/180
+// colombian: 283/229
 
 // DADA2 quality filtering
 params.max_ee              = 2
+params.min_phred_score     = 28
 
 // Diversity analysis
-params.sampling_depth = 27892
+params.sampling_depth = 5167
+// mockdata: 5167
+// colombian: 27892
 
 
 /*
@@ -107,27 +115,28 @@ process IMPORT_PAIRED {
     """
 }
 
-process DEMUX {
-    publishDir "${params.outdir}/demux", mode: 'copy'
-
-    input:
-    path emp_seqs
-    path metadata
-
-    output:
-    path "demux.qza", emit: qza
-    path "demux-details.qza", emit: details
-
-    script:
-    """
-    qiime demux emp-paired \
-        --i-seqs ${emp_seqs} \
-        --m-barcodes-file ${metadata} \
-        --m-barcodes-column ${params.barcode_col} \
-        --o-per-sample-sequences demux.qza \
-        --o-error-correction-details demux-details.qza
-    """
-}
+//process DEMUX {
+//    publishDir "${params.outdir}/demux", mode: 'copy'
+//
+//    input:
+//    path emp_seqs
+//    path metadata
+//
+//    output:
+//    path "demux.qza", emit: qza
+//    path "demux-details.qza", emit: details
+//
+//    script:
+//    """
+//    qiime demux emp-paired \
+//        --i-seqs ${emp_seqs} \
+//        --m-barcodes-file ${metadata} \
+//        --m-barcodes-column ${params.barcode_col} \
+//        --o-per-sample-sequences demux.qza \
+//        --o-error-correction-details demux-details.qza \
+//        --p-chimera-method none
+//    """
+//}
 
 process VISUALIZE_DEMUX {
     publishDir "${params.outdir}/demux", mode: 'copy'
@@ -392,6 +401,23 @@ process DADA2_STATS_VIZ {
     """
 }
 
+process NORMALIZE_TABLE {
+    publishDir "${params.outdir}/normalized_table", mode: 'copy'
+
+    input:
+    path table
+
+    output:
+    path "normalized-table.qza", emit: normalized_table
+
+    script:
+    """
+    qiime feature-table relative-frequency \
+        --i-table ${table} \
+        --o-relative-frequency-table normalized-table.qza
+    """
+}
+
 /*
  * WORKFLOW CONTROL
  */
@@ -441,5 +467,9 @@ workflow {
         DADA2.out.table,
         CLASSIFY_TAXONOMY.out,
         ch_metadata
+    )
+
+    NORMALIZE_TABLE(
+        DADA2.out.table
     )
 }
