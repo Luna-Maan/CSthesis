@@ -26,7 +26,6 @@ params.trunc_len_r    = 180
 
 // DADA2 quality filtering
 params.max_ee              = 2
-params.min_phred_score     = 28
 
 // Diversity analysis
 params.sampling_depth = 5167
